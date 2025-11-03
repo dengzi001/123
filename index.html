@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neo4j智慧问答系统</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .input-group {
+            margin: 20px 0;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            resize: vertical;
+        }
+        button {
+            background: #007cba;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #005a87;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background: #f8f9fa;
+        }
+        .success {
+            border-left: 4px solid #28a745;
+        }
+        .error {
+            border-left: 4px solid #dc3545;
+            background: #f8d7da;
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+        }
+        .query-info {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .schema-info {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e7f3ff;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Neo4j智慧问答系统</h1>
+        <p>请输入您的问题，系统将使用DeepSeek AI生成Cypher查询并返回结果。</p>
+
+        <div class="schema-info" id="schemaInfo">
+            <strong>数据库状态:</strong> 检查中...
+        </div>
+
+        <div class="input-group">
+            <textarea id="questionInput" placeholder="例如：查找所有人物节点，或找到与人工智能相关的领域..."></textarea>
+        </div>
+
+        <button id="submitBtn" onclick="submitQuestion()">提交问题</button>
+
+        <div id="loading" class="loading" style="display: none;">
+            正在处理您的查询，请稍候...
+        </div>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // 页面加载时检查数据库连接
+        window.onload = function() {
+            checkDatabaseHealth();
+        };
+
+        async function checkDatabaseHealth() {
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+
+                const schemaInfo = document.getElementById('schemaInfo');
+                if (data.neo4j_connected) {
+                    schemaInfo.innerHTML = `
+                        <strong>✅ 数据库已连接</strong><br>
+                        <small>
+                            节点标签: ${data.schema['节点标签']?.join(', ') || '无'}<br>
+                            关系类型: ${data.schema['关系类型']?.join(', ') || '无'}<br>
+                            属性键: ${data.schema['属性键']?.join(', ') || '无'}
+                        </small>
+                    `;
+                } else {
+                    schemaInfo.innerHTML = '<strong>❌ 数据库连接失败</strong>';
+                }
+            } catch (error) {
+                document.getElementById('schemaInfo').innerHTML = '<strong>❌ 无法连接到服务器</strong>';
+            }
+        }
+
+        async function submitQuestion() {
+            const question = document.getElementById('questionInput').value.trim();
+            const submitBtn = document.getElementById('submitBtn');
+            const loading = document.getElementById('loading');
+            const resultDiv = document.getElementById('result');
+
+            if (!question) {
+                alert('请输入问题');
+                return;
+            }
+
+            // 禁用按钮并显示加载
+            submitBtn.disabled = true;
+            loading.style.display = 'block';
+            resultDiv.innerHTML = '';
+
+            try {
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ question: question })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <div class="result success">
+                            <h3>查询结果</h3>
+                            <div class="query-info">
+                                <strong>生成的Cypher查询:</strong><br>
+                                ${data.cypher_query}
+                            </div>
+                            <p><strong>AI解释:</strong> ${data.explanation}</p>
+                            <p><strong>返回记录数:</strong> ${data.result_count}</p>
+                            <div class="query-info">
+                                <strong>原始数据 (前10条):</strong><br>
+                                <pre>${JSON.stringify(data.data.slice(0, 10), null, 2)}</pre>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h3>查询失败</h3>
+                            <p><strong>错误信息:</strong> ${data.error}</p>
+                            ${data.cypher_query ? `<div class="query-info">尝试的查询: ${data.cypher_query}</div>` : ''}
+                        </div>
+                    `;
+                }
+
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>请求失败</h3>
+                        <p><strong>错误信息:</strong> ${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                // 恢复按钮状态
+                submitBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+
+        // 支持按Enter键提交
+        document.getElementById('questionInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                submitQuestion();
+            }
+        });
+    </script>
+</body>
+</html>
